@@ -59,24 +59,23 @@ function initial_setup {
 	cut -d , -f 1 work_formatted_date_and_name_clean.txt | sort | uniq > work_unique_dates.txt
 }
 
-handle_args
-initial_setup
+function process_messages {
+	setup_headers results.csv "Date"
 
-setup_headers results.csv "Date"
+	## loop through all the dates and count messages per user per month
+	while read d; do
+		echo "Processing $d...."
+		echo -n "$d" >> results.csv
+		## loop through all the names and count instances for the date range
+		while read n; do
+			OUTPUT=$(grep "$d, $n" work_formatted_date_and_name_clean.txt | wc -l)	
+			echo -n ", ${OUTPUT}" >> results.csv
+		done <work_unique_names.txt
+		echo >> results.csv
+	done <work_unique_dates.txt
+}
 
-## loop through all the dates
-while read d; do
-	echo "Processing $d...."
-	echo -n "$d" >> results.csv
-	## loop through all the names and count instances for the date range
-	while read n; do
-		OUTPUT=$(grep "$d, $n" work_formatted_date_and_name_clean.txt | wc -l)	
-		echo -n ", ${OUTPUT}" >> results.csv
-	done <work_unique_names.txt
-	echo >> results.csv
-done <work_unique_dates.txt
-
-if [ "$times" = "1" ]; then
+function process_times {
 	## get the data by hour
 	cut -d : -f 1,2 "$source" | cut -d " " -f 2,3,5,6 > work_time_and_name.txt
 	awk '($1+0) > 0 && ($1+0) < 13' work_time_and_name.txt > work_time_and_name_clean.txt
@@ -128,9 +127,9 @@ if [ "$times" = "1" ]; then
 		HOUR=$((HOUR+1))
 	done
 	echo
-fi
+}
 
-if test -f "$keyword_file"; then
+function process_search {
 	echo "Processing search terms:"
 	while read s; do
 		echo " - Searching for ${s}"
@@ -151,8 +150,21 @@ if test -f "$keyword_file"; then
 			echo >> $s.csv
 		done <work_unique_dates.txt
 	done <$keyword_file
+}
+
+handle_args
+initial_setup
+process_messages
+
+if [ "$times" = "1" ]; then
+	process_times
+fi
+
+if test -f "$keyword_file"; then
+	process_search
 else
 	echo "Search terms file $keyword_file does not exist.  Not searching for terms"
+	show_help_instructions
 fi
 
 clean_up
