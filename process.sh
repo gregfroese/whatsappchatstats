@@ -1,26 +1,68 @@
 #!/bin/bash
 ## TODO remove non-message lines
 
-## cut out the beginning of the lines up to the first colon (:)
-cut -d : -f 1,2 "$1" | cut -d - -f 1,2,4 > work_date_and_name.txt
+function clean_up {
+	## clean up work files
+	rm work*.txt
+}
 
-## output the year and month along with name to a comma separated list
-awk  -F '- ' '{print $1", "$2}' work_date_and_name.txt > work_formatted_date_and_name.txt
+function show_help_instructions {
+	echo "Usage: ./process.sh -s|--source FILENAME [-t|--times] [-k|--keyword_file FILENAME]"
+	exit
+}
 
-## remove lines that don't start with 2000+
-awk '($1+0)>2000 && ($1+0) < 2100' work_formatted_date_and_name.txt > work_formatted_date_and_name_clean.txt
+function handle_args {
+	if [ "$show_help" = "1" ]; then
+		show_help_instructions
+		exit 1
+	fi
+	if [ "$source" = "" ]; then
+		show_help_instructions
+		exit 1
+	fi
+}
 
-## get just the names
-cut -d , -f 2 work_formatted_date_and_name_clean.txt | sort | uniq > work_unique_names.txt
+function setup_headers {
+	echo -n "$2" > "$1"
+	while read n; do
+		echo -n ", $n" >> "$1"
+	done <work_unique_names.txt
+	echo >> "$1"
+}
 
-## get the unique year-months
-cut -d , -f 1 work_formatted_date_and_name_clean.txt | sort | uniq > work_unique_dates.txt
+keyword_file="search_terms.txt"
+while [[ "$#" -gt 0 ]]; do
+	case $1 in
+		-s|--source) source="$2"; shift ;;
+		-h|--help) show_help=1 ;;
+		-t|--times) times=1 ;;
+		-k|--keyword_file) keyword_file="$2"; shift ;;
+		*) echo "Unknown parameter passed: $1"; exit 1 ;;
+	esac
+	shift
+done
 
-echo -n "Date" > results.csv
-while read n; do
-	echo -n ", $n" >> results.csv
-done <work_unique_names.txt
-echo >> results.csv
+function initial_setup {
+	## cut out the beginning of the lines up to the first colon (:)
+	cut -d : -f 1,2 "$source" | cut -d - -f 1,2,4 > work_date_and_name.txt
+
+	## output the year and month along with name to a comma separated list
+	awk  -F '- ' '{print $1", "$2}' work_date_and_name.txt > work_formatted_date_and_name.txt
+
+	## remove lines that don't start with 2000+
+	awk '($1+0)>2000 && ($1+0) < 2100' work_formatted_date_and_name.txt > work_formatted_date_and_name_clean.txt
+
+	## get just the names
+	cut -d , -f 2 work_formatted_date_and_name_clean.txt | sort | uniq > work_unique_names.txt
+
+	## get the unique year-months
+	cut -d , -f 1 work_formatted_date_and_name_clean.txt | sort | uniq > work_unique_dates.txt
+}
+
+handle_args
+initial_setup
+
+setup_headers results.csv "Date"
 
 ## loop through all the dates
 while read d; do
@@ -34,9 +76,9 @@ while read d; do
 	echo >> results.csv
 done <work_unique_dates.txt
 
-if [ "run" = "run" ]; then
+if [ "$times" = "1" ]; then
 	## get the data by hour
-	cut -d : -f 1,2 "$1" | cut -d " " -f 2,3,5,6 > work_time_and_name.txt
+	cut -d : -f 1,2 "$source" | cut -d " " -f 2,3,5,6 > work_time_and_name.txt
 	awk '($1+0) > 0 && ($1+0) < 13' work_time_and_name.txt > work_time_and_name_clean.txt
 
 	echo -n "Processing times"
@@ -69,11 +111,7 @@ if [ "run" = "run" ]; then
 	echo
 
 	echo "Counting messages by hour and name"
-	echo -n "Hour" > times.csv
-	while read n; do
-		echo -n ", $n" >> times.csv
-	done <work_unique_names.txt
-	echo >> times.csv
+	setup_headers "times.csv" "Hour"
 
 	HOUR=0
 	echo -n "Processing time data: "
@@ -92,31 +130,29 @@ if [ "run" = "run" ]; then
 	echo
 fi
 
-## works on small data sets, not the whole thing
-echo "Processing search terms:"
-while read s; do
-	echo " - Searching for ${s}"
-	grep -rin "$s" "$1" | cut -d : -f 3-10 > work_term.txt
-	paste -d ":" <(cut -d , -f 1 work_term.txt | cut -d : -f 3 | cut -d - -f 1,2) <(cut -d " " -f 5,6 work_term.txt | cut -d : -f 1) > work_term_clean.txt
-	## remove lines that don't start with 2000+
-	awk '($1+0)>2000 && ($1+0) < 2100' work_term_clean.txt > work_term_clean2.txt
+if test -f "$keyword_file"; then
+	echo "Processing search terms:"
+	while read s; do
+		echo " - Searching for ${s}"
+		grep -rin "$s" "$source" | cut -d : -f 3-10 > work_term.txt
+		paste -d ":" <(cut -d , -f 1 work_term.txt | cut -d : -f 3 | cut -d - -f 1,2) <(cut -d " " -f 5,6 work_term.txt | cut -d : -f 1) > work_term_clean.txt
+		## remove lines that don't start with 2000+
+		awk '($1+0)>2000 && ($1+0) < 2100' work_term_clean.txt > work_term_clean2.txt
 
-	echo -n "Date" > $s.csv
-	while read n; do
-		echo -n ", $n" >> $s.csv
-	done <work_unique_names.txt	
-	echo >> $s.csv
+		setup_headers "${s}.csv" "Date"
 
-	while read d; do
-		echo -n "$d" >> $s.csv
-		## loop through all the names and count instances for the term
-		while read n; do
-			OUTPUT=$(grep "$d:$n" work_term_clean2.txt | wc -l)	
-			echo -n ", ${OUTPUT}" >> $s.csv
-		done <work_unique_names.txt
-		echo >> $s.csv
-	done <work_unique_dates.txt
-done <search_terms.txt
+		while read d; do
+			echo -n "$d" >> $s.csv
+			## loop through all the names and count instances for the term
+			while read n; do
+				OUTPUT=$(grep "$d:$n" work_term_clean2.txt | wc -l)	
+				echo -n ", ${OUTPUT}" >> $s.csv
+			done <work_unique_names.txt
+			echo >> $s.csv
+		done <work_unique_dates.txt
+	done <$keyword_file
+else
+	echo "Search terms file $keyword_file does not exist.  Not searching for terms"
+fi
 
-## clean up work files
-rm work*.txt
+clean_up
